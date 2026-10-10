@@ -1,0 +1,24 @@
+menu "Projecta PM335 (Bluetooth, optional)"
+
+    config PM335_ENABLE
+        bool "Connect to a Projecta Intelli-RV PM335 over Bluetooth"
+        default n
+        help
+            Adds water tanks and Hot water / Water pump switches to the Overview and a
+            PM335 card to the web page. Off: the Overview shows large temperature tiles
+            (the original layout) and Bluetooth is never started.
+
+    config PM335_MAC
+        string "PM335 BLE address"
+        default "00:00:00:00:00:00"
+        help
+            The unit's Bluetooth address (the IntelliJay app lists it; or scan with
+            nRF Connect). The login password (the app's pairing key) is not set here:
+            it's stored on the display through the web API.
+
+    config PM335_POLL_S
+        int "System status poll interval (s)"
+        default 3
+        range 2 300
+
+endmenu

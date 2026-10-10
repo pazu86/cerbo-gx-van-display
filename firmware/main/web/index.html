@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Van Display</title>
+<style>
+  :root { --bg:#0b0b0c; --card:#1c1c1e; --border:#387dc5; --text:#faf9f5; --dim:#969591;
+          --green:#72b84c; --orange:#f0962e; --red:#f35c58; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, sans-serif; }
+  header { padding:18px 16px 6px; max-width:900px; margin:auto; display:flex; align-items:baseline; gap:12px; }
+  header h1 { margin:0; font-size:24px; }
+  header span { color:var(--dim); }
+  main { max-width:900px; margin:auto; padding:8px 16px 40px; display:grid; gap:14px; }
+  section { background:var(--card); border:2px solid var(--border); border-radius:10px; padding:14px 16px; }
+  h2 { margin:0 0 10px; font-size:17px; font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:8px 18px; }
+  .kv span { display:block; color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .kv b { font-weight:500; overflow-wrap:anywhere; }
+  .ok { color:var(--green); } .warn { color:var(--orange); } .bad { color:var(--red); }
+  label { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 0;
+          border-bottom:1px solid #2a2a2c; }
+  label:last-of-type { border-bottom:0; }
+  input, select, button { font:inherit; color:var(--text); background:#2a2a2c; border:1px solid #3a3a3c;
+                          border-radius:6px; padding:6px 10px; }
+  input[type=range] { padding:0; width:min(260px, 50vw); accent-color:var(--border); }
+  input[type=checkbox] { width:20px; height:20px; accent-color:var(--border); }
+  button { background:var(--border); border-color:var(--border); cursor:pointer; }
+  button.secondary { background:#2a2a2c; border-color:#3a3a3c; }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  progress { width:100%; height:10px; accent-color:var(--border); }
+  #msg, #otamsg, #pmmsg { color:var(--dim); min-height:1.4em; }
+  .ctl { display:grid; grid-template-columns:auto 90px 90px; gap:10px 12px; align-items:center; margin-top:12px;
+         max-width:360px; }
+  .ctl button { padding:12px 10px; }
+</style>
+</head>
+<body>
+<header><h1>Van Display</h1><span id="ver"></span></header>
+<main>
+  <section id="pmcard">
+    <h2>Projecta PM335</h2>
+    <div class="grid" id="pm"><div class="kv"><span>Status</span><b>loading...</b></div></div>
+    <div class="ctl">
+      <span>Water pump</span><button data-prop="011d" data-val="0001">On</button><button class="secondary" data-prop="011d" data-val="0000">Off</button>
+      <span>Hot water</span><button data-prop="011e" data-val="0001">On</button><button class="secondary" data-prop="011e" data-val="0000">Off</button>
+      <span>Silent mode</span><button data-prop="0207" data-val="01">On</button><button class="secondary" data-prop="0207" data-val="00">Off</button>
+      <span>Van power</span><span></span><button class="secondary" data-addr="ffff00" data-prop="0109" data-val="00"
+        data-confirm="Turn the van's 12 V power OFF? If this display runs from switched power it will turn off too - use the Projecta PWR button to turn it back on.">Off</button>
+    </div>
+    <div class="row">
+      <button id="pmlink" class="secondary">Release for the phone app</button><span id="pmmsg"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Health</h2>
+    <div class="grid" id="health"><div class="kv"><span>Status</span><b>loading...</b></div></div>
+  </section>
+
+  <section>
+    <h2>Display and sleep</h2>
+    <form id="settings">
+      <label>Brightness <span><input type="range" name="brightness" min="5" max="100"> <output></output></span></label>
+      <label>Theme
+        <select name="theme">
+          <option value="0">Auto (dark overnight)</option><option value="1">Dark</option><option value="2">Day</option>
+        </select></label>
+      <label>Screen off after
+        <select name="idle_timeout_s">
+          <option value="0">Never</option><option value="10">10 s</option><option value="30">30 s</option>
+          <option value="60">1 min</option><option value="120">2 min</option><option value="300">5 min</option>
+          <option value="600">10 min</option><option value="900">15 min</option><option value="1800">30 min</option>
+          <option value="3600">60 min</option>
+        </select></label>
+      <label>Overnight schedule <input type="checkbox" name="night_enabled"></label>
+      <label>Screen off at <input type="time" name="night_off" step="1800"></label>
+      <label>Back on at <input type="time" name="night_on" step="1800"></label>
+      <label>Touch overnight wakes it at <span><input type="range" name="night_wake_brightness" min="5" max="60"> <output></output></span></label>
+      <label>for
+        <select name="night_wake_secs">
+          <option value="15">15 s</option><option value="30">30 s</option>
+          <option value="60">60 s</option><option value="120">2 min</option>
+        </select></label>
+      <div class="row"><button type="submit">Save</button><span id="msg"></span></div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Firmware</h2>
+    <div class="grid" id="fw"></div>
+    <div class="row">
+      <input type="file" id="bin" accept=".bin">
+      <button id="upload" disabled>Update</button>
+      <button id="restart" class="secondary">Restart</button>
+    </div>
+    <progress id="prog" value="0" max="100" hidden></progress>
+    <div id="otamsg"></div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const form = $('#settings');
+const hhmm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+const mins = t => { const [h, m] = t.split(':').map(Number); return h * 60 + Math.round(m / 30) * 30; };
+const dur = s => { const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60;
+                   return (d ? d + 'd ' : '') + h + 'h ' + String(m).padStart(2, '0') + 'm'; };
+
+/* Values come from the device and from ip-api.com (ISP name): escape them */
+let lastPartition = '';
+const esc = v => String(v).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+function kv(label, value, cls) {
+  return `<div class="kv"><span>${label}</span><b class="${cls || ''}">${esc(value)}</b></div>`;
+}
+
+async function health() {
+  try {
+    const h = await (await fetch('/api/health')).json();
+    const m = h.memory_kb, c = h.cerbo, w = h.wifi;
+    $('#ver').textContent = h.firmware;
+    if (h.name) { $('header h1').textContent = h.name; document.title = h.name; }
+    $('#health').innerHTML =
+      kv('Cerbo', `${c.state} (${c.host || '-'})`, c.state === 'live' ? 'ok' : 'warn') +
+      kv('Messages', `${c.messages}, last ${c.last_message_s < 0 ? '-' : c.last_message_s + ' s ago'}`) +
+      kv('Travel feed', c.travel_feed ? 'receiving' : 'none', c.travel_feed ? 'ok' : 'warn') +
+      kv('WiFi', `${w.ssid || '-'} ${w.rssi ? w.rssi + ' dBm' : ''}`, w.state === 'connected' ? 'ok' : 'bad') +
+      kv('IP', w.ip || '-') +
+      kv('Internet', `${h.internet.service || '-'} ${h.internet.isp ? '(' + h.internet.isp + ')' : ''}`) +
+      kv('Screen', h.screen) +
+      kv('Uptime', dur(h.uptime_s)) +
+      kv('Last reset', h.reset_reason, h.reset_reason === 'crash' || h.reset_reason === 'watchdog' ? 'bad' : '') +
+      kv('Internal RAM', `${m.internal_free} kB free (low ${m.internal_min})`, m.internal_min < 15 ? 'warn' : '') +
+      kv('PSRAM', `${m.psram_free} kB free (low ${m.psram_min})`);
+    lastPartition = h.partition;
+    $('#fw').innerHTML = kv('Version', h.firmware) + kv('Built', h.built) + kv('Running from', h.partition) +
+                         kv('ESP-IDF', h.idf);
+  } catch (e) {
+    $('#health').innerHTML = kv('Status', 'not responding', 'bad');
+  }
+}
+
+function showRange(input) { input.nextElementSibling.textContent = input.value + ' %'; }
+form.querySelectorAll('input[type=range]').forEach(r => r.addEventListener('input', () => showRange(r)));
+
+async function loadSettings() {
+  const s = await (await fetch('/api/settings')).json();
+  form.brightness.value = s.brightness;
+  form.idle_timeout_s.value = s.idle_timeout_s;
+  form.night_enabled.checked = s.night_enabled;
+  form.night_off.value = hhmm(s.night_off_min);
+  form.night_on.value = hhmm(s.night_on_min);
+  form.night_wake_brightness.value = s.night_wake_brightness;
+  form.night_wake_secs.value = s.night_wake_secs;
+  form.theme.value = s.theme;
+  form.querySelectorAll('input[type=range]').forEach(showRange);
+}
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    brightness: +form.brightness.value,
+    idle_timeout_s: +form.idle_timeout_s.value,
+    night_enabled: form.night_enabled.checked,
+    night_off_min: mins(form.night_off.value),
+    night_on_min: mins(form.night_on.value),
+    night_wake_brightness: +form.night_wake_brightness.value,
+    night_wake_secs: +form.night_wake_secs.value,
+    theme: +form.theme.value,
+  };
+  const r = await fetch('/api/settings', {method: 'POST', body: JSON.stringify(body)});
+  $('#msg').textContent = r.ok ? 'Saved' : 'Save failed';
+  if (r.ok) loadSettings();
+  setTimeout(() => $('#msg').textContent = '', 3000);
+});
+
+$('#bin').addEventListener('change', () => $('#upload').disabled = !$('#bin').files.length);
+
+$('#upload').addEventListener('click', () => {
+  const file = $('#bin').files[0];
+  if (!file || !confirm(`Update the display with ${file.name}?`)) return;
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/ota');
+  $('#prog').hidden = false;
+  $('#upload').disabled = true;
+  xhr.upload.onprogress = e => { if (e.lengthComputable) $('#prog').value = e.loaded / e.total * 100; };
+  const beforeSlot = lastPartition;   /* a successful update boots the other slot */
+  xhr.onload = () => {
+    if (xhr.status !== 200) {
+      $('#otamsg').textContent = 'Update failed: ' + xhr.responseText;
+      $('#upload').disabled = false;
+      return;
+    }
+    followUpdate(beforeSlot);
+  };
+  xhr.onerror = () => { $('#otamsg').textContent = 'Upload failed'; $('#upload').disabled = false; };
+  xhr.send(file);
+});
+
+/* After an upload: countdown -> reboot -> confirming the new firmware -> done */
+async function followUpdate(beforeSlot) {
+  const msg = $('#otamsg'), prog = $('#prog');
+  const deadline = Date.now() + 3 * 60 * 1000;
+  let rebooted = false;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 1500));
+    let h;
+    try {
+      h = await (await fetch('/api/health', {cache: 'no-store'})).json();
+    } catch (e) {
+      rebooted = true;
+      msg.textContent = 'Restarting into the new firmware...';
+      continue;
+    }
+    const u = h.update;
+    if (u.phase === 'restarting') {
+      msg.textContent = `Installed - restarting in ${u.secs}...`;
+    } else if (u.phase === 'verifying') {
+      rebooted = true;
+      prog.value = u.pct;
+      msg.textContent = `Finishing update to ${h.firmware} (${u.pct} %) - don't restart or power off`;
+    } else if (u.phase === 'idle' && (rebooted || h.uptime_s < 120)) {
+      prog.value = 100;
+      msg.textContent = h.partition !== beforeSlot
+        ? `Updated to ${h.firmware} and confirmed.`
+        : `The new firmware didn't confirm and was rolled back - still running ${h.firmware}.`;
+      $('#upload').disabled = false;
+      health();
+      return;
+    }
+  }
+  msg.textContent = 'The display hasn\'t come back yet - check it, then reload this page.';
+}
+
+$('#restart').addEventListener('click', async () => {
+  if (!confirm('Restart the display?')) return;
+  const r = await fetch('/api/restart', {method: 'POST'});
+  if (!r.ok) {
+    $('#otamsg').textContent = await r.text();
+    return;
+  }
+  $('#otamsg').textContent = 'Restarting...';
+  setTimeout(() => location.reload(), 15000);
+});
+
+/* ---- Projecta PM335 (BLE bridge) ---- */
+let pmEnabled = true;
+async function pm() {
+  try {
+    const s = await (await fetch('/api/pm335', {cache: 'no-store'})).json();
+    if (s.available === false) {   /* firmware built without CONFIG_PM335_ENABLE */
+      $('#pmcard').hidden = true;
+      clearInterval(pmTimer);
+      return;
+    }
+    pmEnabled = s.enabled;
+    const st = !s.enabled ? 'released (phone app can connect)' : s.logged_in ? 'connected' : s.state;
+    /* System status 0104-0109: 0104 battery V (/100) ... 0109 power (last byte) */
+    const sys = (s.values || []).find(v => v.addr === 'ffff00' && v.first === '0104');
+    let power = '-', volts = '-';
+    if (sys && sys.data.length >= 24) {
+      power = sys.data.slice(-2) === '01' ? 'on' : 'off';
+      volts = (parseInt(sys.data.slice(0, 4), 16) / 100).toFixed(2) + ' V';
+    }
+    /* Omega2000 0100-0129: tanks 1-3 as u16 % at bytes 36/38/40 (matched to the Projecta LCD) */
+    const ctl = (s.values || []).find(v => v.addr === s.ctl_addr && v.first === '0100');
+    const tank = n => {
+      if (!ctl || ctl.data.length < 84) return '-';
+      return parseInt(ctl.data.substr((36 + n * 2) * 2, 4), 16) + ' %';
+    };
+    $('#pm').innerHTML =
+      kv('Link', st, s.logged_in ? 'ok' : s.enabled ? 'warn' : '') +
+      kv('Van power', power, power === 'on' ? 'ok' : power === 'off' ? 'warn' : '') +
+      kv('Battery', volts) +
+      kv('Tank 1', tank(0)) + kv('Tank 2', tank(1)) + kv('Tank 3', tank(2)) +
+      kv('Signal', s.rssi ? s.rssi + ' dBm' : '-') +
+      kv('Problem', s.error || 'none', s.error ? 'warn' : '');
+    $('#pmlink').textContent = s.enabled ? 'Release for the phone app' : 'Reconnect the display';
+    document.querySelectorAll('.ctl button').forEach(b => b.disabled = !s.logged_in);
+  } catch (e) {
+    $('#pm').innerHTML = kv('Link', 'not responding', 'bad');
+  }
+}
+
+document.querySelectorAll('.ctl button').forEach(b => b.addEventListener('click', async () => {
+  let el = b.previousElementSibling;   /* the row's name: nearest non-empty span before the button */
+  while (el && !(el.tagName === 'SPAN' && el.textContent)) el = el.previousElementSibling;
+  const label = el ? el.textContent : '';
+  if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
+  $('#pmmsg').textContent = `${label} ${b.textContent.toLowerCase()}...`;
+  const control = {prop: b.dataset.prop, value: b.dataset.val};
+  if (b.dataset.addr) control.addr = b.dataset.addr;
+  const r = await fetch('/api/pm335', {method: 'POST', body: JSON.stringify({control})});
+  setTimeout(pm, 1200);
+  $('#pmmsg').textContent = r.ok ? `${label} ${b.textContent.toLowerCase()} - sent` : `Failed: ${await r.text()}`;
+}));
+
+$('#pmlink').addEventListener('click', async () => {
+  await fetch('/api/pm335', {method: 'POST', body: JSON.stringify({enabled: !pmEnabled})});
+  pm();
+});
+
+loadSettings();
+health();
+pm();
+setInterval(health, 5000);
+const pmTimer = setInterval(pm, 3000);
+</script>
+</body>
+</html>

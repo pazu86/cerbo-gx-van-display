@@ -1,0 +1,126 @@
+{
+  "id": "display_feed",
+  "label": "Van Display feed",
+  "info": "Publishes a compact travel summary to MQTT VanDisplay/travel (retained) every 10 s for the ESP32 display. Reads the Travel Log's files; doesn't modify that tab. Source: Van Display repo, nodered/build_feed_flow.py",
+  "nodes": [
+    {
+      "id": "display_feed_inject",
+      "type": "inject",
+      "z": "display_feed",
+      "name": "Every 10 s",
+      "x": 140,
+      "y": 80,
+      "wires": [
+        [
+          "display_feed_state"
+        ]
+      ],
+      "props": [],
+      "repeat": "10",
+      "crontab": "",
+      "once": true,
+      "onceDelay": "5",
+      "topic": ""
+    },
+    {
+      "id": "display_feed_state",
+      "type": "file in",
+      "z": "display_feed",
+      "name": "state.json",
+      "x": 340,
+      "y": 80,
+      "wires": [
+        [
+          "display_feed_keep"
+        ]
+      ],
+      "filename": "/data/home/nodered/.node-red/travel_log/state.json",
+      "filenameType": "str",
+      "format": "utf8",
+      "chunk": false,
+      "sendError": false,
+      "encoding": "none",
+      "allProps": false
+    },
+    {
+      "id": "display_feed_keep",
+      "type": "change",
+      "z": "display_feed",
+      "name": "msg.state = payload",
+      "x": 520,
+      "y": 80,
+      "wires": [
+        [
+          "display_feed_trips"
+        ]
+      ],
+      "rules": [
+        {
+          "t": "move",
+          "p": "payload",
+          "pt": "msg",
+          "to": "state",
+          "tot": "msg"
+        }
+      ]
+    },
+    {
+      "id": "display_feed_trips",
+      "type": "file in",
+      "z": "display_feed",
+      "name": "trips.json",
+      "x": 700,
+      "y": 80,
+      "wires": [
+        [
+          "display_feed_build"
+        ]
+      ],
+      "filename": "/data/home/nodered/.node-red/travel_log/trips.json",
+      "filenameType": "str",
+      "format": "utf8",
+      "chunk": false,
+      "sendError": false,
+      "encoding": "none",
+      "allProps": false
+    },
+    {
+      "id": "display_feed_build",
+      "type": "function",
+      "z": "display_feed",
+      "name": "Build display summary",
+      "x": 880,
+      "y": 80,
+      "wires": [
+        [
+          "display_feed_out"
+        ]
+      ],
+      "func": "// Compact travel summary for the display (keep it < 2 kB).\nlet s = {}, t = [];\ntry { s = JSON.parse(msg.state || '{}'); } catch (e) {}\ntry { t = JSON.parse(msg.payload || '[]'); } catch (e) {}\nif (!Array.isArray(t)) t = [];\n\nconst r1 = n => +Number(n || 0).toFixed(1);\nconst fuel = Number(s.fuel_l_per_100km || 16);\nconst step = Number(s.service_step_km || 5000);\nconst since = Number(s.since_service_km || 0);\nconst kmLeft = Math.max(0, step - since);\nconst nd = new Date(`${s.next_service_date || ''}T00:00:00+10:00`);\nconst days = Number.isFinite(nd.getTime()) ? Math.ceil((nd - new Date()) / 86400000) : null;\nconst trip = s.trip || {};\nconst name = x => x.name || (x.place_label ? `Trip to ${x.place_label}` : 'Trip');\n\nconst total = t.reduce((a, x) => a + Number(x.distance_km || 0), 0);\nconst monthly = {};\nfor (const x of t) {\n    const d = new Date(x.end_ts || x.start_ts);\n    if (!Number.isFinite(d.getTime())) continue;\n    const k = d.toISOString().slice(0, 7);\n    monthly[k] = (monthly[k] || 0) + Number(x.distance_km || 0);\n}\n\nconst last = t[0];\nmsg.topic = 'VanDisplay/travel';\nmsg.retain = true;\nmsg.payload = JSON.stringify({\n    v: 1,\n    ts: Math.round(Date.now() / 1000),\n    odo_km: r1(s.total_km),\n    service: {\n        km_left: r1(kmLeft), pct: Math.min(100, Math.round(since / step * 100)),\n        days_left: days, next_date: s.next_service_date || null,\n        due: kmLeft <= 0 || (days !== null && days <= 0),\n        warn: kmLeft <= 500 || (days !== null && days <= 30),\n    },\n    at_home: !!s.at_home,\n    home: s.home ? { lat: s.home.lat, lon: s.home.lon } : null,\n    trip: {\n        active: !!trip.active, km: r1(trip.distance_km), fuel_l: r1((trip.distance_km || 0) * fuel / 100),\n        start: trip.start_ts || null, max_kmh: r1((trip.max_speed_mps || 0) * 3.6),\n        max_from_home_km: r1(trip.max_dist_home_km),\n    },\n    last: last ? {\n        name: name(last), km: r1(last.distance_km), nights: Number(last.nights_away || 0),\n        dur: last.duration_text || '', end: (last.end_ts || '').slice(0, 10),\n        fuel_l: r1(last.fuel_litres || (last.distance_km || 0) * fuel / 100),\n    } : null,\n    recent: t.slice(0, 6).map(x => ({ name: name(x), km: r1(x.distance_km), nights: Number(x.nights_away || 0),\n                                      end: (x.end_ts || '').slice(0, 10) })),\n    stats: { trips: t.length, nights: t.reduce((a, x) => a + Number(x.nights_away || 0), 0), km: r1(total),\n             longest_km: r1(Math.max(0, ...t.map(x => Number(x.distance_km || 0)))) },\n    monthly: Object.keys(monthly).sort().reverse().slice(0, 6).map(k => ({ m: k, km: r1(monthly[k]) })),\n});\nreturn msg;",
+      "outputs": 1,
+      "timeout": 0,
+      "noerr": 0,
+      "initialize": "",
+      "finalize": "",
+      "libs": []
+    },
+    {
+      "id": "display_feed_out",
+      "type": "mqtt out",
+      "z": "display_feed",
+      "name": "VanDisplay/travel",
+      "x": 1080,
+      "y": 80,
+      "wires": [],
+      "topic": "",
+      "qos": "0",
+      "retain": "",
+      "respTopic": "",
+      "contentType": "",
+      "userProps": "",
+      "correl": "",
+      "expiry": "",
+      "broker": "REPLACE_WITH_YOUR_BROKER_NODE_ID"
+    }
+  ]
+}

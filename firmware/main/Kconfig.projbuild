@@ -1,0 +1,21 @@
+menu "Van Display"
+
+    config DISPLAY_TITLE
+        string "Title shown in the header and on the web page"
+        default "My Van"
+
+    config DISPLAY_HOSTNAME
+        string "Network hostname (http://<hostname>.local)"
+        default "van-display"
+
+    config DISPLAY_TZ
+        string "Time zone (POSIX TZ string)"
+        default "AEST-10"
+        help
+            Local time for the clock, schedules and trip dates. Note POSIX
+            signs are inverted: "AEST-10" is UTC+10. Examples: Brisbane
+            "AEST-10", Sydney/Melbourne "AEST-10AEDT,M10.1.0,M4.1.0/3",
+            Perth "AWST-8", Auckland "NZST-12NZDT,M9.5.0,M4.1.0/3",
+            London "GMT0BST,M3.5.0/1,M10.5.0", US Pacific "PST8PDT,M3.2.0,M11.1.0".
+
+endmenu
