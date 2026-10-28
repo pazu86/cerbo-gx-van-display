@@ -141,12 +141,10 @@ static esp_err_t http_event(esp_http_client_event_t *e)
     return ESP_OK;
 }
 
-static int fetch_png(int z, int x, int y, uint8_t *buf, int max)
+/* One GET on the shared connection (opened if needed); on failure the connection is dropped */
+static esp_err_t perform(const char *url, uint8_t *buf, int max)
 {
-    char url[96];
-    snprintf(url, sizeof(url), TILE_URL, z, x, y);
     s_fetch = (fetch_ctx_t){.buf = buf, .max = max};
-
     if (!s_http) {
         esp_http_client_config_t cfg = {
             .url = url,
@@ -160,21 +158,37 @@ static int fetch_png(int z, int x, int y, uint8_t *buf, int max)
         };
         s_http = esp_http_client_init(&cfg);
         if (!s_http) {
-            return -1;
+            return ESP_ERR_NO_MEM;
         }
     } else {
         esp_http_client_set_url(s_http, url);
     }
 
     esp_err_t err = esp_http_client_perform(s_http);
-    int status = err == ESP_OK ? esp_http_client_get_status_code(s_http) : 0;
     if (err != ESP_OK) {
         /* Drop the connection; the next tile starts a fresh one */
         esp_http_client_cleanup(s_http);
         s_http = NULL;
+    }
+    return err;
+}
+
+static int fetch_png(int z, int x, int y, uint8_t *buf, int max)
+{
+    char url[96];
+    snprintf(url, sizeof(url), TILE_URL, z, x, y);
+    bool reused = s_http != NULL;
+    esp_err_t err = perform(url, buf, max);
+    /* A kept-alive connection the server closed while idle fails at once:
+     * retry on a fresh one now rather than in RETRY_US */
+    if (err != ESP_OK && reused) {
+        err = perform(url, buf, max);
+    }
+    if (err != ESP_OK) {
         ESP_LOGW(TAG, "tile %d/%d/%d: %s", z, x, y, esp_err_to_name(err));
         return -1;
     }
+    int status = esp_http_client_get_status_code(s_http);
     if (status != 200 || s_fetch.overflow) {
         ESP_LOGW(TAG, "tile %d/%d/%d: HTTP %d%s", z, x, y, status, s_fetch.overflow ? " (too big)" : "");
         return -1;
@@ -239,7 +253,8 @@ static void map_task(void *arg)
 
         int len = fetch_png(z, x, y, png, PNG_MAX);
         bool ok = len > 0 && png565_decode(dec, png, len, job->px, TILE, TILE);
-        ESP_LOGI(TAG, "tile %d/%d/%d %s (%d bytes)", z, x, y, ok ? "ok" : "FAILED", len);
+        ESP_LOGI(TAG, "tile %d/%d/%d %s (%d bytes), %lld ms", z, x, y, ok ? "ok" : "FAILED", len,
+                 (esp_timer_get_time() - now) / 1000);
 
         xSemaphoreTake(s_lock, portMAX_DELAY);
         if (ok) {
@@ -472,4 +487,51 @@ void map_update(double lat, double lon, float course, double home_lat, double ho
         }
     }
     lv_obj_set_hidden(s_home, !home_vis);
+}
+
+void map_prefetch(double lat, double lon, double home_lat, double home_lon)
+{
+    if (!s_task) {
+        return;
+    }
+    if (isnan(lat) || isnan(lon)) {
+        lat = home_lat;   /* no fix: home, as map_update shows */
+        lon = home_lon;
+    }
+    if (isnan(lat) || isnan(lon)) {
+        return;
+    }
+
+    const int z = s_zoom, n = 1 << z;
+    double cx = lon_to_px(lon, z), cy = lat_to_px(lat, z);
+    double left = cx - MAP_W / 2.0, top = cy - MAP_H / 2.0;
+    int tx0 = (int)floor(left / TILE), ty0 = (int)floor(top / TILE);
+    int tx1 = (int)floor((left + MAP_W - 1) / TILE), ty1 = (int)floor((top + MAP_H - 1) / TILE);
+
+    bool want_fetch = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_tick++;
+    s_view_z = z;
+    s_view_tx = cx / TILE;
+    s_view_ty = cy / TILE;
+    for (int ty = ty0; ty <= ty1; ty++) {
+        if (ty < 0 || ty >= n) {
+            continue;
+        }
+        for (int tx = tx0; tx <= tx1; tx++) {
+            int wx = ((tx % n) + n) % n;
+            slot_t *s = find_slot(z, wx, ty);
+            if (!s) {
+                s = request_slot(z, wx, ty);
+                want_fetch = true;
+            }
+            if (s) {
+                s->last_used = s_tick;
+            }
+        }
+    }
+    xSemaphoreGive(s_lock);
+    if (want_fetch) {
+        xTaskNotifyGive(s_task);
+    }
 }

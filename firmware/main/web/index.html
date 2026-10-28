@@ -84,6 +84,7 @@
           <option value="15">15 s</option><option value="30">30 s</option>
           <option value="60">60 s</option><option value="120">2 min</option>
         </select></label>
+      <label>Travel safety: pump + hot water off when moving <input type="checkbox" name="travel_safety"></label>
       <div class="row"><button type="submit">Save</button><span id="msg"></span></div>
     </form>
   </section>
@@ -95,6 +96,7 @@
       <input type="file" id="bin" accept=".bin">
       <button id="upload" disabled>Update</button>
       <button id="restart" class="secondary">Restart</button>
+      <button id="check" class="secondary">Check for update</button>
     </div>
     <progress id="prog" value="0" max="100" hidden></progress>
     <div id="otamsg"></div>
@@ -136,7 +138,7 @@ async function health() {
       kv('PSRAM', `${m.psram_free} kB free (low ${m.psram_min})`);
     lastPartition = h.partition;
     $('#fw').innerHTML = kv('Version', h.firmware) + kv('Built', h.built) + kv('Running from', h.partition) +
-                         kv('ESP-IDF', h.idf);
+                         kv('ESP-IDF', h.idf) + kv('Self-update from HA', h.update.self_update || 'not checked yet');
   } catch (e) {
     $('#health').innerHTML = kv('Status', 'not responding', 'bad');
   }
@@ -155,6 +157,7 @@ async function loadSettings() {
   form.night_wake_brightness.value = s.night_wake_brightness;
   form.night_wake_secs.value = s.night_wake_secs;
   form.theme.value = s.theme;
+  form.travel_safety.checked = s.travel_safety;
   form.querySelectorAll('input[type=range]').forEach(showRange);
 }
 
@@ -169,6 +172,7 @@ form.addEventListener('submit', async e => {
     night_wake_brightness: +form.night_wake_brightness.value,
     night_wake_secs: +form.night_wake_secs.value,
     theme: +form.theme.value,
+    travel_safety: form.travel_safety.checked,
   };
   const r = await fetch('/api/settings', {method: 'POST', body: JSON.stringify(body)});
   $('#msg').textContent = r.ok ? 'Saved' : 'Save failed';
@@ -233,6 +237,13 @@ async function followUpdate(beforeSlot) {
   }
   msg.textContent = 'The display hasn\'t come back yet - check it, then reload this page.';
 }
+
+/* Ask HA for a newer published build now; the result shows under Self-update */
+$('#check').addEventListener('click', async () => {
+  const r = await fetch('/api/update/check', {method: 'POST'});
+  $('#otamsg').textContent = r.ok ? 'Checking Home Assistant for an update...' : 'Check failed';
+  setTimeout(() => $('#otamsg').textContent = '', 5000);
+});
 
 $('#restart').addEventListener('click', async () => {
   if (!confirm('Restart the display?')) return;

@@ -13,8 +13,10 @@
 #include "fwupdate.h"
 #include "esp_timer.h"
 #include "inet.h"
+#include "motion.h"
 #include "net.h"
 #include "pm335.h"
+#include "selfupdate.h"
 #include "secrets.h"
 #include "settings.h"
 #include "ui.h"
@@ -76,4 +78,10 @@ void app_main(void)
 
     /* After WiFi has its buffers: BLE is optional, the display works without it */
     pm335_start();
+
+    /* Pump and hot water off once the GPS shows the van is on the move */
+    motion_start();
+
+    /* Installs a newer build published to Home Assistant (tools\build.ps1 ha) */
+    selfupdate_start();
 }

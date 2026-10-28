@@ -31,9 +31,10 @@ file under a "This van" section so later sessions know it.
   with that network's Cerbo IP; `.home = true` marks the home network) and the web login. Never put
   real credentials anywhere else, and never commit `secrets.h`.
 - Build/flash: `.\tools\build.ps1` (build), `.\tools\build.ps1 flash monitor` (USB),
-  `.\tools\build.ps1 ota` (over WiFi: uploads, then follows the update until it's confirmed).
+  `.\tools\build.ps1 ota` (over WiFi: uploads, then follows the update until it's confirmed),
+  `.\tools\build.ps1 ha` (publishes to Home Assistant for the optional self-update, see below).
   Env vars: `DISPLAY_PORT` (COM port, default COM10), `DISPLAY_HOST` (IP if mDNS doesn't resolve),
-  `DISPLAY_WEB_PASS`. The script dot-sources the Espressif installer's
+  `DISPLAY_WEB_PASS`, `DISPLAY_HA_SSH` (ssh target for `ha`, default `ha`). The script dot-sources the Espressif installer's
   `C:\Espressif\tools\Microsoft.v5.5.5.PowerShell_profile.ps1`; adjust it to the version they
   installed. Run it from PowerShell. On macOS/Linux, use `idf.py` in `firmware/` directly.
 - `idf.py menuconfig`: **Van Display** (header title, hostname, time zone as a POSIX TZ string,
@@ -48,6 +49,7 @@ file under a "This van" section so later sessions know it.
   - `GET/POST /api/settings`
   - `POST /api/ota`
   - `POST /api/restart`
+  - `POST /api/update/check` (self-update: ask HA now)
   - `GET/POST /api/pm335`
 - Serial logs: the native USB-Serial-JTAG port. Never toggle DTR/RTS: it resets into download mode.
 
@@ -63,7 +65,10 @@ firmware/components/pm335   optional Projecta PM335 BLE bridge (NimBLE central)
 firmware/main               ui.c (header, themes, overlays), page_overview/solar/travel/settings,
                             map.c + png565.c (OSM tiles), power.c (sleep), settings.c (NVS),
                             fwupdate.c (OTA lifecycle), web.c + web/index.html, inet.c (ISP),
-                            splash.c (boot splash, main/splash/splash.jpg)
+                            splash.c (boot splash, main/splash/splash.jpg),
+                            motion.c (travel safety), selfupdate.c (optional update from HA)
+homeassistant/              van_display_update custom component (serves builds to selfupdate.c)
+tools/setup_update_key.py   self-update key -> secrets.h (+ HA secrets.yaml with --ssh)
 tools/make_splash.py        picture -> 1024x600 baseline JPEG splash (+ preview PNG)
 nodered/                    optional "Van Display feed" tab (travel summary -> MQTT VanDisplay/travel)
 enclosure/                  CadQuery rear shell -> STEP/STL
@@ -114,6 +119,9 @@ enclosure/                  CadQuery rear shell -> STEP/STL
   User-Agent (`map.c`).
 - After an OTA the new firmware confirms itself (15 s with WiFi up, else 60 s). Restarts and
   uploads are refused (409) until then; an unconfirmed image rolls back on the next reset.
+- Map tiles are prefetched while another page shows (`page_travel_prefetch` from `ui.c`'s
+  refresh). A kept-alive tile connection the server closed while idle is retried at once on a
+  fresh one.
 - Inline Python patch scripts via a bash heredoc mangle `\n` in C strings; use a file edit tool.
 
 ## Cerbo notes
@@ -151,17 +159,43 @@ Read `.claude/skills/projecta-pm335-ble/` first: protocol, quirks and tools. In 
 - Hot water ON turns the pump on first; pump OFF turns hot water off too.
 - Van power (FFFF00 0109) is web-only and Off-only: it can power the display down.
 - **Don't switch loads yourself.** The user presses the buttons; read-only queries are fine.
+- **Travel safety** (`motion.c`, on by default, Settings switch / `travel_safety` setting): an
+  anchor follows wherever the van sits still (50 m for 20 s); once every good GPS fix for 30 s is
+  more than 350 m from it, pump and hot water are switched off (hot water first) for 90 s, then the
+  anchor moves on. GPS jumps that come back reset the dwell. The switch only stops the switching;
+  detection always runs (`/api/health` `motion`) and also holds back self-updates on the move.
+  Without `CONFIG_PM335_ENABLE` the Settings switch is greyed out and nothing is switched.
 - Memory: BLE controller in flash (`BT_CTRL_RUN_IN_FLASH_ONLY`), NimBLE allocations and task
   stacks in PSRAM. A crash guard skips BLE after 2 crash boots. With the option off, BLE never
   starts and the linker drops most of it. Leave `CONFIG_BT_ENABLED=y`: the component needs the
   headers.
 
+## Self-update from Home Assistant (optional)
+
+`selfupdate.c` + `homeassistant/custom_components/van_display_update` (user guide:
+`homeassistant/README.md`). Off unless `secrets.h` defines `DISPLAY_UPDATE_KEY` (with
+`DISPLAY_HA_URL`, optional `DISPLAY_HA_LOCAL_URL` tried first on `.home` networks).
+- A minute after joining a network, then every 30 min, not while moving (motion.c) or during an
+  update: `GET /api/van_display/manifest?running=<v>` (header `X-Display-Key`), and if newer,
+  `GET /api/van_display/firmware` streamed into the other OTA slot with size + SHA-256 checked;
+  then fwupdate.c's countdown, restart and self-confirmation. A version the bootloader rolled back
+  is never fetched again.
+- HA serves `/config/van_display/firmware.bin` only with the key (the image embeds secrets.h: never
+  `/config/www`) and checks the image's project name is `van_display`. Entity
+  `update.van_display_firmware`. Keep `project(van_display)` in `firmware/CMakeLists.txt` in step
+  with `PROJECT` in the component.
+- The self-update task has a PSRAM stack (TLS), so OTA writes run in a short-lived internal-stack
+  helper task, and the rolled-back version is read once in `selfupdate_start()` from app_main:
+  reading it from the PSRAM-stack task crash-looped the original display.
+
 ## Status of this kit
 
-- Builds cleanly with ESP-IDF 5.5.5, with and without `CONFIG_PM335_ENABLE`.
-- The original display runs this code (v2.4.7, plus the v2.5.0 boot splash) in production. The
-  kit's renames (title, hostname, MQTT prefix `VanDisplay/`), the time zone option and the PM335
-  build switch were build-tested only, not run on hardware: check the first flash closely.
-- Version reset to 1.0.0.
+- Builds cleanly with ESP-IDF 5.5.5, with and without `CONFIG_PM335_ENABLE` and self-update.
+- 1.1.0 matches the original display's v2.9.3, in production: travel safety, self-update from
+  HA, Check for update, map prefetch. The kit's renames (title, hostname, MQTT prefix
+  `VanDisplay/`, `DISPLAY_` secrets, the `van_display_update` HA component, cut down from a
+  multi-display one), the time zone option and the PM335 build switch were build-tested only, not
+  run on hardware: check the first flash closely.
+- 1.0.0 matched the original's v2.4.7 plus the v2.5.0 boot splash.
 - Public repository: keep personal data (WiFi names, IPs, portal IDs, MACs, serials, home
   location, names in pictures) out of anything committed. `secrets.h` is git-ignored.

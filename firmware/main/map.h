@@ -17,3 +17,7 @@ void map_create(lv_obj_t *parent, int x, int y);
 
 /* lat/lon NAN = unknown. home NAN = no home marker. course in degrees, NAN = no heading. */
 void map_update(double lat, double lon, float course_deg, double home_lat, double home_lon);
+
+/* Off the Travel page: queue the tiles map_update would show, so the map is ready when it opens.
+ * No LVGL calls; same arguments as map_update. */
+void map_prefetch(double lat, double lon, double home_lat, double home_lon);

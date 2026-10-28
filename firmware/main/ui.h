@@ -69,5 +69,6 @@ void page_solar_create(lv_obj_t *parent);
 void page_solar_update(const cerbo_data_t *d);
 void page_travel_create(lv_obj_t *parent);
 void page_travel_update(const cerbo_data_t *d);
+void page_travel_prefetch(const cerbo_data_t *d);
 void page_settings_create(lv_obj_t *parent);
 void page_settings_update(const cerbo_data_t *d);

@@ -22,6 +22,7 @@ typedef struct {
     uint8_t night_wake_secs;       /* ... for this long */
     uint8_t theme;                 /* theme_t; Auto = dark overnight */
     uint16_t idle_timeout_s;       /* screen off after this long untouched; 0 = never */
+    uint8_t travel_safety_off;     /* 1 = leave pump / hot water alone on the move; 0 (default) = switch them off */
 } settings_t;
 
 void settings_init(void);          /* loads from NVS (or defaults) */

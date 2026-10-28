@@ -74,6 +74,13 @@ static void short_date(char *buf, size_t n, const char *iso)
     }
 }
 
+void page_travel_prefetch(const cerbo_data_t *d)
+{
+    const cerbo_travel_t *t = &d->travel;
+    bool fix = d->gps_fix == 1 && !isnan(d->lat);
+    map_prefetch(fix ? d->lat : NAN, fix ? d->lon : NAN, t->valid ? t->home_lat : NAN, t->valid ? t->home_lon : NAN);
+}
+
 void page_travel_update(const cerbo_data_t *d)
 {
     const cerbo_travel_t *t = &d->travel;

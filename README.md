@@ -41,15 +41,21 @@ for a **Projecta Intelli-RV PM335** power manager (water tanks, water pump, hot 
 |---|---|
 | **Overview** | Solar, DC-DC charger (Orion) and a 240 V charger flowing into the battery; battery %, volts, amps and time to go; DC loads; a "Net" positive/negative indicator; temperature sensors. |
 | **Solar** | A card for each MPPT solar charger and a 7-day yield chart. |
-| **Travel** | An OpenStreetMap map centred on the Cerbo's GPS position, plus an optional trip summary (odometer, last trip, service due) fed by Node-RED. |
-| **Settings** | Theme (Dark / Day / Auto), brightness, screen-off timer, overnight schedule with touch-to-peek, WiFi choice, device info, firmware version. |
+| **Travel** | An OpenStreetMap map centred on the Cerbo's GPS position, plus an optional trip summary (odometer, last trip, service due) fed by Node-RED. Map tiles load in the background while another page is showing, so the map is ready when you open it. |
+| **Settings** | Theme (Dark / Day / Auto), brightness, screen-off timer, travel safety switch (Projecta option), overnight schedule with touch-to-peek, WiFi choice, device info, firmware version, Check for update. |
 | **Header** | Page tabs, internet source (home / Starlink / 4G carrier, worked out from the public IP), WiFi network (tap to pick one) and clock. |
 | **Alarm overlay** | A Cerbo digital input in alarm (e.g. a smoke alarm) takes over the screen and wakes it. |
 | **Boot splash** | A full-screen picture for 5 seconds at power-up. Swap in a photo of your own van. |
 | **Web page** | `http://van-display.local`: health, settings, and firmware upload over WiFi (no cable needed after the first flash). |
 
 With the Projecta option turned on, the Overview also shows water tank levels and Hot water /
-Water pump buttons, and the web page gets a PM335 card.
+Water pump buttons, and the web page gets a PM335 card. **Travel safety** (on by default, switch on
+the Settings page) then turns the water pump and hot water off once the Cerbo's GPS shows the van
+has really moved (more than 350 m from where it was parked, for 30 seconds), so you don't drive off
+with them running.
+
+Optionally, if you run **Home Assistant**, the display can update itself from a build you publish
+there: see [`homeassistant/README.md`](homeassistant/README.md).
 
 The display finds Victron devices **by their name** (the custom name you gave them on the Cerbo),
 not by instance numbers. Which devices exist, what they're called, and which ones matter to you is
@@ -330,10 +336,11 @@ Brisbane (`AEST-10`). The help text there lists other examples.
 
 | | |
 |---|---|
-| `GET /api/health` | firmware version, uptime, memory, WiFi, Cerbo status, update state |
+| `GET /api/health` | firmware version, uptime, memory, WiFi, Cerbo status, update and self-update state, travel safety (`motion`) |
 | `GET/POST /api/settings` | the Settings page values |
 | `POST /api/ota` | upload new firmware (raw `.bin` body) |
 | `POST /api/restart` | restart |
+| `POST /api/update/check` | check Home Assistant for a newer build now (self-update) |
 | `GET/POST /api/pm335` | Projecta status and setup (when enabled) |
 
 ## Optional extras
@@ -376,6 +383,12 @@ which Claude Code loads automatically when it's relevant. Other models (PM200/30
 the same way, but their property map may differ. The skill explains how to capture and decode your
 own unit's traffic.
 
+**Travel safety** then watches the GPS: once the van has moved more than 350 m from where it sat
+still, for 30 seconds, it switches off the pump and hot water if they're on (for 90 seconds, then
+again after every further 350 m). Switching the pump back on at a stop is left alone. Needs a GPS
+on the Cerbo; turn it off on the Settings page if you don't want it. `/api/health` shows what it
+sees under `motion`.
+
 **Caution:** the pump, the hot water and the van's power are real loads. Test with someone at the
 van. Running hot water without the pump, or switching off the 12 V that powers the display, are
 easy mistakes. Van power is deliberately web-only and Off-only.
@@ -401,6 +414,14 @@ printing.
 
 ![Enclosure](enclosure/preview-inside.png)
 
+### Self-update from Home Assistant
+
+Build on your PC, run `.\tools\build.ps1 ha`, and the display installs the new firmware by itself
+the next time it checks (a minute after joining a network, then every 30 minutes, never while
+the van is moving), even when the van is away from home. Needs a small custom component in
+Home Assistant, included in [`homeassistant/`](homeassistant/): setup steps in
+[`homeassistant/README.md`](homeassistant/README.md). Off unless you set it up.
+
 ---
 
 ## Troubleshooting
@@ -414,6 +435,7 @@ printing.
 | No COM port appears | Use the port labelled **"USB"**, and a data cable (some USB-C cables only charge). |
 | `van-display.local` doesn't resolve | Use the IP from the Settings page: `$env:DISPLAY_HOST = '192.168.1.x'`. |
 | OTA says 409 / refused | The display is still confirming the previous update. Wait a minute. |
+| Settings says "Updates: couldn't reach Home Assistant" | Check `DISPLAY_HA_URL` in `secrets.h` opens in a browser, and that HA was restarted after adding `van_display_update`. Only matters if you set up self-update. |
 | Map stays grey | Map tiles need internet. Check the header's internet indicator, and that the Cerbo has a GPS fix. |
 | Build can't find ESP-IDF | Check the profile path near the top of `tools/build.ps1` matches your ESP-IDF version. |
 
@@ -429,7 +451,9 @@ firmware/                    ESP-IDF project (ESP-IDF 5.5, LVGL 9)
   main/secrets.example.h     template for your WiFi / Cerbo IP / web login
   main/splash/               boot splash JPEG (made by tools/make_splash.py)
   partitions.csv             16 MB flash, two OTA slots
-tools/build.ps1              build / flash / OTA helper (Windows PowerShell)
+tools/build.ps1              build / flash / OTA / publish-to-HA helper (Windows PowerShell)
+tools/setup_update_key.py    one-off key setup for the optional self-update from Home Assistant
+homeassistant/               optional HA custom component the display updates itself from
 tools/make_splash.py         turns a picture into the boot splash
 assets/                      source picture for the splash
 nodered/                     optional Node-RED flow that feeds the Travel page

@@ -1,5 +1,5 @@
 /*
- * Settings: brightness, idle timeout, overnight schedule, device info.
+ * Settings: brightness, idle timeout, travel safety, overnight schedule, device info.
  * Changes apply immediately and are saved; the web interface edits the same
  * settings, so the widgets re-sync whenever settings_version() moves.
  */
@@ -15,13 +15,14 @@
 #include "inet.h"
 #include "net.h"
 #include "power.h"
+#include "selfupdate.h"
 #include "settings.h"
 #include "ui.h"
 
 static const uint16_t s_timeouts[] = {0, 10, 30, 60, 120, 300, 600, 900, 1800, 3600};   /* seconds */
 static const uint8_t s_wake_secs[] = {15, 30, 60, 120};
 
-static lv_obj_t *s_bright, *s_bright_lbl, *s_timeout, *s_theme;
+static lv_obj_t *s_bright, *s_bright_lbl, *s_timeout, *s_theme, *s_travel_sw;
 static lv_obj_t *s_night_sw, *s_night_off, *s_night_on, *s_wake_bright, *s_wake_bright_lbl, *s_wake_secs_dd;
 static lv_obj_t *s_info;
 static uint32_t s_synced_version;
@@ -55,6 +56,7 @@ static void save_from_widgets(void)
     s.night_wake_brightness = lv_slider_get_value(s_wake_bright);
     s.night_wake_secs = s_wake_secs[lv_dropdown_get_selected(s_wake_secs_dd)];
     s.theme = lv_dropdown_get_selected(s_theme);   /* option order = theme_t */
+    s.travel_safety_off = !lv_obj_has_state(s_travel_sw, LV_STATE_CHECKED);
     settings_set(&s);
     s_synced_version = settings_version();
 }
@@ -94,6 +96,11 @@ static void restart_cb(lv_event_t *e)
     if (!fw_busy()) {   /* never interrupt a firmware update or its confirmation */
         esp_restart();
     }
+}
+
+static void check_update_cb(lv_event_t *e)
+{
+    selfupdate_check_now();
 }
 
 static lv_obj_t *row_label(lv_obj_t *card, const char *text, int x, int y)
@@ -138,6 +145,7 @@ static void sync_widgets(void)
     ui_text_fmt(s_wake_bright_lbl, "%d %%", s.night_wake_brightness);
     lv_dropdown_set_selected(s_wake_secs_dd, index_of_u8(s_wake_secs, sizeof(s_wake_secs), s.night_wake_secs));
     lv_dropdown_set_selected(s_theme, s.theme);
+    lv_obj_set_state(s_travel_sw, LV_STATE_CHECKED, !s.travel_safety_off);
     s_synced_version = settings_version();
 }
 
@@ -162,9 +170,22 @@ void page_settings_create(lv_obj_t *p)
     s_theme = dropdown(disp, "Auto\nDark\nDay", 0, -8, 140);   /* order = theme_t; Auto: dark overnight */
     lv_obj_align(s_theme, LV_ALIGN_TOP_RIGHT, 0, -8);
 
-    lv_obj_t *sleep = ui_card(p, 520, 8, 488, 130, LV_SYMBOL_POWER, "Sleep");
-    row_label(sleep, "Screen off after", 0, 56);
-    s_timeout = dropdown(sleep, "Never\n10 s\n30 s\n1 min\n2 min\n5 min\n10 min\n15 min\n30 min\n60 min", 250, 46, 200);
+    lv_obj_t *sleep = ui_card(p, 520, 8, 236, 130, LV_SYMBOL_POWER, "Screen off after");
+    s_timeout = dropdown(sleep, "Never\n10 s\n30 s\n1 min\n2 min\n5 min\n10 min\n15 min\n30 min\n60 min", 0, 46, 200);
+
+    /* Travel safety (motion.c): pump and hot water off when the GPS shows the van moving */
+    lv_obj_t *travel = ui_card(p, 772, 8, 236, 130, LV_SYMBOL_GPS, "Travel");
+    s_travel_sw = lv_switch_create(travel);
+    lv_obj_align(s_travel_sw, LV_ALIGN_TOP_RIGHT, 0, -4);
+    lv_obj_add_event_cb(s_travel_sw, changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+#if CONFIG_PM335_ENABLE
+    lv_obj_t *tl = ui_label(travel, &lv_font_montserrat_16, C_DIM, "Pump and hot water\noff when moving");
+#else
+    lv_obj_add_state(s_travel_sw, LV_STATE_DISABLED);   /* switches through the PM335, so nothing to do */
+    lv_obj_t *tl = ui_label(travel, &lv_font_montserrat_16, C_DIM, "Needs the Projecta\nPM335 option");
+#endif
+    lv_obj_set_style_text_line_space(tl, 4, 0);
+    lv_obj_align(tl, LV_ALIGN_TOP_LEFT, 0, 50);
 
     lv_obj_t *night = ui_card(p, 16, 150, 992, 170, LV_SYMBOL_BELL, "Overnight");
     s_night_sw = lv_switch_create(night);
@@ -185,15 +206,23 @@ void page_settings_create(lv_obj_t *p)
 
     lv_obj_t *dev = ui_card(p, 16, 332, 992, 212, LV_SYMBOL_SETTINGS, "Device");
     s_info = ui_label(dev, &lv_font_montserrat_20, C_TEXT, "");
-    lv_obj_set_style_text_line_space(s_info, 8, 0);
+    lv_obj_set_style_text_line_space(s_info, 6, 0);   /* 5 lines in the card */
     lv_obj_align(s_info, LV_ALIGN_TOP_LEFT, 0, 40);
+    /* Right-hand column under the WiFi choice, fixed sizes (lv_obj_align_to on
+     * content-sized buttons runs before they have a size and stacks them) */
     lv_obj_t *btn = lv_button_create(dev);
+    lv_obj_set_size(btn, 230, 44);
     lv_obj_align(btn, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    lv_obj_t *bl = ui_label(btn, &lv_font_montserrat_20, C_TEXT, LV_SYMBOL_REFRESH "  Restart");
+    lv_obj_t *bl = ui_label(btn, &lv_font_montserrat_20, C_TEXT, LV_SYMBOL_REFRESH "  Hold to restart");
     lv_obj_center(bl);
     lv_obj_add_event_cb(btn, restart_cb, LV_EVENT_LONG_PRESSED, NULL);
-    lv_obj_t *hint = ui_label(dev, &lv_font_montserrat_16, C_DIM, "hold to restart");
-    lv_obj_align_to(hint, btn, LV_ALIGN_OUT_LEFT_MID, -12, 0);
+    /* Ask HA for a newer build now (same as the web "Check for update"); result on the Updates line */
+    lv_obj_t *chk = lv_button_create(dev);
+    lv_obj_set_size(chk, 230, 44);
+    lv_obj_align(chk, LV_ALIGN_BOTTOM_RIGHT, 0, -54);
+    lv_obj_t *cl = ui_label(chk, &lv_font_montserrat_20, C_TEXT, LV_SYMBOL_DOWNLOAD "  Check for update");
+    lv_obj_center(cl);
+    lv_obj_add_event_cb(chk, check_update_cb, LV_EVENT_CLICKED, NULL);
 
     /* WiFi network choice (also from the header's WiFi status) */
     char opts[160] = "Auto";
@@ -230,14 +259,18 @@ void page_settings_update(const cerbo_data_t *d)
     inet_status_t is;
     inet_get(&is);
     uint32_t up = (uint32_t)(esp_timer_get_time() / 1000000);
+    char note[64];
+    selfupdate_note(note, sizeof(note));
     ui_text_fmt(s_info,
                           "Web settings   " "#387DC5 http://" CONFIG_DISPLAY_HOSTNAME ".local#" "   (%s)\n"
                           "WiFi  %s  %d dBm      Internet  %s %s\n"
-                          "Cerbo  %s, %lu messages\n"
-                          "Firmware  %s      Up  %lud %02lu:%02lu      Memory  %u kB internal, %u kB PSRAM free",
+                          "Cerbo  %s, %lu messages      Up  %lud %02lu:%02lu\n"
+                          "Firmware  %s      Memory  %u kB internal, %u kB PSRAM free\n"
+                          "Updates  %s",
                           ns.ip[0] ? ns.ip : "no IP", ns.ssid[0] ? ns.ssid : "--", ns.rssi,
                           inet_kind_name(is.kind), is.isp, cerbo_state_name(d->state), (unsigned long)d->rx_count,
-                          esp_app_get_description()->version, up / 86400, (up / 3600) % 24, (up / 60) % 60,
+                          up / 86400, (up / 3600) % 24, (up / 60) % 60, esp_app_get_description()->version,
                           (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
-                          (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+                          (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                          note[0] ? note : "not checked yet");
 }

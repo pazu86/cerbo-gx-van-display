@@ -60,6 +60,7 @@ static void sanitise(settings_t *s)
     if (s->night_wake_brightness < 5 || s->night_wake_brightness > 100) s->night_wake_brightness = s_defaults.night_wake_brightness;
     if (s->night_wake_secs < 5) s->night_wake_secs = s_defaults.night_wake_secs;
     if (s->theme > THEME_DAY) s->theme = THEME_AUTO;
+    s->travel_safety_off = s->travel_safety_off ? 1 : 0;
 }
 
 void settings_init(void)

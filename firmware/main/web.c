@@ -1,6 +1,7 @@
 #include "sdkconfig.h"
 #include "web.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,8 @@
 #include "mbedtls/base64.h"
 #include "mdns.h"
 #include "net.h"
+#include "motion.h"
+#include "selfupdate.h"
 #include "pm335.h"
 #include "power.h"
 #include "secrets.h"
@@ -141,6 +144,9 @@ static esp_err_t health_get(httpd_req_t *req)
     cJSON_AddNumberToObject(u, "pct", fw.pct);
     cJSON_AddNumberToObject(u, "secs", fw.secs);
     cJSON_AddStringToObject(u, "message", fw.message);
+    char note[64];
+    selfupdate_note(note, sizeof(note));
+    cJSON_AddStringToObject(u, "self_update", note);
 
     cJSON *m = cJSON_AddObjectToObject(j, "memory_kb");
     cJSON_AddNumberToObject(m, "internal_free", heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
@@ -166,6 +172,18 @@ static esp_err_t health_get(httpd_req_t *req)
     cJSON_AddNumberToObject(c, "messages", d.rx_count);
     cJSON_AddNumberToObject(c, "last_message_s", d.last_rx_us ? (double)((now - d.last_rx_us) / 1000000) : -1);
     cJSON_AddBoolToObject(c, "travel_feed", d.travel.valid);
+
+    motion_status_t mo;
+    motion_get(&mo);
+    cJSON *mj = cJSON_AddObjectToObject(j, "motion");
+    cJSON_AddBoolToObject(mj, "enabled", mo.enabled);
+    cJSON_AddNumberToObject(mj, "gps_fix", d.gps_fix);
+    cJSON_AddBoolToObject(mj, "anchored", mo.anchored);
+    cJSON_AddNumberToObject(mj, "from_anchor_m", roundf(mo.from_anchor_m));
+    cJSON_AddNumberToObject(mj, "far_s", mo.far_s);
+    cJSON_AddNumberToObject(mj, "trips", mo.trips);
+    cJSON_AddNumberToObject(mj, "offs_sent", mo.offs_sent);
+    cJSON_AddNumberToObject(mj, "last_trip_s", mo.last_trip_s);
     return send_json(req, j);
 }
 
@@ -182,6 +200,7 @@ static cJSON *settings_json(void)
     cJSON_AddNumberToObject(j, "night_wake_brightness", s.night_wake_brightness);
     cJSON_AddNumberToObject(j, "night_wake_secs", s.night_wake_secs);
     cJSON_AddNumberToObject(j, "theme", s.theme);
+    cJSON_AddBoolToObject(j, "travel_safety", !s.travel_safety_off);
     return j;
 }
 
@@ -222,6 +241,7 @@ static esp_err_t settings_post(httpd_req_t *req)
     NUM(theme);
 #undef NUM
     if (cJSON_IsBool(v = cJSON_GetObjectItem(j, "night_enabled"))) s.night_enabled = cJSON_IsTrue(v);
+    if (cJSON_IsBool(v = cJSON_GetObjectItem(j, "travel_safety"))) s.travel_safety_off = !cJSON_IsTrue(v);
     cJSON_Delete(j);
     settings_set(&s);
     return send_json(req, settings_json());
@@ -476,6 +496,15 @@ static esp_err_t pm335_post(httpd_req_t *req)
     return pm335_get_h(req);
 }
 
+/* Ask Home Assistant for a newer published build now */
+static esp_err_t update_check_post(httpd_req_t *req)
+{
+    if (!authorised(req)) return ESP_OK;
+    selfupdate_check_now();
+    httpd_resp_sendstr(req, "checking");
+    return ESP_OK;
+}
+
 static esp_err_t restart_post(httpd_req_t *req)
 {
     if (!authorised(req) || refuse_if_busy(req)) return ESP_OK;
@@ -514,6 +543,7 @@ void web_start(void)
         {.uri = "/api/settings", .method = HTTP_POST, .handler = settings_post},
         {.uri = "/api/ota", .method = HTTP_POST, .handler = ota_post},
         {.uri = "/api/restart", .method = HTTP_POST, .handler = restart_post},
+        {.uri = "/api/update/check", .method = HTTP_POST, .handler = update_check_post},
         {.uri = "/api/pm335", .method = HTTP_GET, .handler = pm335_get_h},
         {.uri = "/api/pm335", .method = HTTP_POST, .handler = pm335_post},
     };

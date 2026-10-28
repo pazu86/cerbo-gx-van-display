@@ -8,3 +8,5 @@ firmware/main/secrets.h
 # Python
 __pycache__/
 *.pyc
+# Self-update key snippet from tools/setup_update_key.py - paste into HA, then delete
+tools/van_display_key.yaml

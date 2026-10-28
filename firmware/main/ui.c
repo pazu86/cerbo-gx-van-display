@@ -563,6 +563,9 @@ static void refresh_cb(lv_timer_t *t)
     case 2: page_travel_update(&d); break;
     case 3: page_settings_update(&d); break;
     }
+    if (s_page != 2) {
+        page_travel_prefetch(&d);   /* map tiles load in the background */
+    }
 }
 
 void ui_init(void)
